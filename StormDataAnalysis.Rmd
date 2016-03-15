@@ -7,16 +7,14 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-try(library(curl), silent=TRUE)
-try(library(data.table), silent=TRUE)
-try(library(R.utils), silent=TRUE)
-try(library(dplyr), silent=TRUE)
-try(library(stringdist), silent=TRUE)
-try(library(stringr), silent=TRUE)
-try(library(ggplot2), silent=TRUE)
-try(library(grid), silent=TRUE)
-try(library(gridExtra), silent=TRUE)
-
+require("curl",character.only = TRUE)
+require("data.table",character.only = TRUE)
+require("R.utils",character.only = TRUE)
+require("dplyr",character.only = TRUE)
+require("stringdist",character.only = TRUE)
+require("ggplot2",character.only = TRUE)
+require("gridExtra",character.only = TRUE)
+require("stringr",character.only = TRUE)
 
 ```
 ## Introducton
@@ -91,8 +89,7 @@ head(stormDataset)
 ### Removing Monthy And Yearly Data rows
 ```{r}
 stormDataset$EVTYPE <- str_trim(toupper(stormDataset$EVTYPE))
-stormDataset <- filter(stormDataset, !(EVTYPE %like% "SUMMARY"))
-stormDataset <- filter(stormDataset, !(EVTYPE %like% "MONTHLY"))
+stormDataset <- filter(stormDataset, !grepl('SUMMARY|MONTHLY', EVTYPE))
 ```
 ### Event type
 Event Type is an important factor for our Storm Data Analysis. We need to verify the accuracy of the Event type.
@@ -128,7 +125,7 @@ TotalRows <- nrow(EventTypesTable)
 rownames(EventTypesTable) <- 1:TotalRows
 EventTypesTable <- arrange(EventTypesTable,Cluster)
 filter(EventTypesTable,Cluster==45)
-filter(EventTypesTable, EventTypes %like% "UNSEASONA")
+filter(EventTypesTable, grepl('UNSEASONA', EventTypes))
 ```
 ### Merge Culsterd Event Types With the Storm Data
 
