@@ -1,0 +1,429 @@
+---
+title: "Severe weather events causes public health and economic problems"
+author: "Samarjit Roy"
+date: "March 6, 2016"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+try(library(curl), silent=TRUE)
+try(library(data.table), silent=TRUE)
+try(library(R.utils), silent=TRUE)
+try(library(dplyr), silent=TRUE)
+try(library(stringdist), silent=TRUE)
+try(library(stringr), silent=TRUE)
+try(library(ggplot2), silent=TRUE)
+try(library(grid), silent=TRUE)
+try(library(gridExtra), silent=TRUE)
+
+
+```
+## Introducton
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. Many severe events can result in fatalities, injuries, and property damage, and preventing such outcomes to the extent possible is a key concern.
+
+This project involves exploring the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. This database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage.
+
+##Data
+
+The data for this analysis comes in the form of a comma-separated-value file compressed via the bzip2 algorithm from the following link :
+
+* [Storm Data](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2) 
+
+```{r}
+
+#Download Storm Data
+DataURL="https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+downloadFileName <- "repdata-data-StormData.csv.bz2"
+if (!file.exists(downloadFileName))
+{
+  download.file(DataURL, dest=downloadFileName, method="libcurl",quiet = TRUE)
+}
+# if zip file exists, unzip with overwrite
+stormFileName <- "repdata-data-StormData.csv"
+if (file.exists(downloadFileName) && !file.exists(stormFileName))
+{
+    bunzip2(downloadFileName, stormFileName, remove = FALSE, skip = TRUE)
+} 
+stormDataset <- read.csv(stormFileName)
+
+```
+
+Summary Data for Storm Data:
+
+```{r}
+summary(stormDataset)
+```
+
+## Data Transformations
+
+### Data Scope
+Due to changes in the data collection and processing procedures over time, there are unique periods of records available depending on the event type. [NOAA's National Weather Service (NWS)](https://www.ncdc.noaa.gov/stormevents/details.jsp) has classified data into the following Event Types: 
+
+1. Tornado: From 1950 through 1954, only tornado events were recorded.
+
+2. Tornado, Thunderstorm Wind and Hail: From 1955 through 1992, only tornado, thunderstorm wind and hail events were keyed from the paper publications into digital data. From 1993 to 1995, only tornado, thunderstorm wind and hail events have been extracted from the Unformatted Text Files.
+
+3. All Event Types (48 from Directive 10-1605): From 1996 to present, 48 event types are recorded as defined in NWS Directive 10-1605. 
+
+
+Therefore we are selecting only the data that has been collected from the 1996-2011 time period, and the data set was filtered down to contain events that happened on or after Jan 1, 1996. A total of 653530 records were retained, ranging from Jan 1, 1996 to November 30, 2011. 
+
+#### Formatting Date Columns
+Let's convert the BGN_DATE column to the POSIXct format. Also add a new column, EventYear, for Year of the Event.
+```{r}
+stormDataset$BGN_DATE <- as.POSIXct(stormDataset$BGN_DATE, format="%m/%d/%Y %H:%M:%S")
+stormDataset$EventYear <- format(stormDataset$BGN_DATE, "%Y")
+```
+#### Restrict Data range to Jan 1,1996 - November 30, 2011
+
+```{r}
+stormDataset <- filter(stormDataset, BGN_DATE >= as.POSIXct('1/1/1996', format="%m/%d/%Y"))
+#head(stormDataset)
+```
+### Selecting only the colums required 
+Storm Data has lots of information, which we do not need for this analysis. Let's select only the colums required.
+```{r}
+stormDataset <- select(stormDataset, EVTYPE,FATALITIES, INJURIES, PROPDMG, PROPDMGEXP,CROPDMG, CROPDMGEXP, STATEOFFIC,EventYear)
+stormDataset <- filter(stormDataset, FATALITIES>0 | INJURIES>0 | PROPDMG>0 | CROPDMG>0)
+head(stormDataset)
+```
+### Removing Monthy And Yearly Data rows
+```{r}
+stormDataset$EVTYPE <- str_trim(toupper(stormDataset$EVTYPE))
+stormDataset <- filter(stormDataset, !(EVTYPE %like% "SUMMARY"))
+stormDataset <- filter(stormDataset, !(EVTYPE %like% "MONTHLY"))
+```
+### Event type
+Event Type is an important factor for our Storm Data Analysis. We need to verify the accuracy of the Event type.
+```{r}
+EventTypes <- sort(unique(stormDataset$EVTYPE))
+head(EventTypes,20)
+tail(EventTypes)
+```
+[NOAA's National Weather Service (NWS)](https://www.ncdc.noaa.gov/stormevents/details.jsp) has also clearly said that there are only 48 Event Types which is not the same as what we see in storm data. The 48 Event Types also defined in the [Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf). Looks like we need to clean the Event Types.
+To come up with a reasonable number of Event Types, We are using the Hierarchical Cluster Analysis method. 
+```{r}
+EventTypes <- sort(unique(stormDataset$EVTYPE))
+distanceEventMatrix <- stringdistmatrix(EventTypes, EventTypes, method="jw")
+rownames(distanceEventMatrix) <- EventTypes
+EventTypesHC <- hclust(as.dist(distanceEventMatrix))
+plot(EventTypesHC)
+```
+
+As it was told that we have only 48 events, we tried with k=48, which produced the following sample:
+```{r}
+dend1 <- cutree(EventTypesHC,k=48)
+EventTypesTable <- data.frame(EventTypes,Cluster=dend1)
+TotalRows <- nrow(EventTypesTable)
+rownames(EventTypesTable) <- 1:TotalRows
+EventTypesTable <- arrange(EventTypesTable,Cluster)
+filter(EventTypesTable,Cluster==45)
+```
+The cluster does not make sense. We also tried with different h values. Looks like .14 is the better option for h.
+```{r}
+dend1 <- cutree(EventTypesHC,h=.14)
+EventTypesTable <- data.frame(EventTypes,Cluster=dend1)
+TotalRows <- nrow(EventTypesTable)
+rownames(EventTypesTable) <- 1:TotalRows
+EventTypesTable <- arrange(EventTypesTable,Cluster)
+filter(EventTypesTable,Cluster==45)
+filter(EventTypesTable, EventTypes %like% "UNSEASONA")
+```
+### Merge Culsterd Event Types With the Storm Data
+
+```{r}
+EventTypesByCluster <- EventTypesTable %>% group_by(Cluster) %>% slice(which.max(EventTypes))
+colnames(EventTypesByCluster) <- c("EventName","Cluster")
+Events <- full_join(EventTypesTable,EventTypesByCluster)
+stormDataset <- merge(stormDataset, Events, by.x="EVTYPE", by.y="EventTypes", all.x=T, all.y=F)
+```
+### Property/Crop Damage Dollar Amount 
+As PROPDMG and CROPDMG have different values according to the units (B-Billion, M-Million, K-Thousand), we converted all ammounts fields to one unit. 
+
+```{r}
+stormDataset$PROPDMG <- ifelse(stormDataset$PROPDMGEXP == 'B', 1E9,
+                        ifelse(stormDataset$PROPDMGEXP == 'M', 1E6,
+                        ifelse(stormDataset$PROPDMGEXP == 'K', 1E3, 0))) * stormDataset$PROPDMG
+stormDataset$CROPDMG <- ifelse(stormDataset$CROPDMGEXP == 'B', 1E9,
+                        ifelse(stormDataset$CROPDMGEXP == 'M', 1E6,
+                        ifelse(stormDataset$CROPDMGEXP == 'K', 1E3, 0))) * stormDataset$CROPDMG
+# Summarized Dataset
+stormDatasetSUM <- stormDataset %>% group_by(Cluster) %>% 
+  summarize(EventName=first(EventName), FATALITIES = sum(FATALITIES, na.rm=T), 
+            INJURIES = sum(INJURIES, na.rm=T), PROPDMG = sum(PROPDMG, na.rm=T), 
+            CROPDMG = sum(CROPDMG, na.rm=T)) %>% ungroup()
+```
+
+## Results
+
+### The top ten Events causing Fatalities and Injuries.
+We are looking at those storm types that have the largest effects on population health. 
+
+```{r}
+stormDatasetFATALITIES <- transform(stormDatasetSUM, EventName = reorder(EventName,FATALITIES)) %>% arrange(desc(FATALITIES))
+title1 <- "Top 10 Most Fatal by Event Type"
+subtitle1 <- ""
+p1 <- ggplot(data=stormDatasetFATALITIES[1:10,]) + 
+		 scale_x_discrete(name="Event Type") +
+		 scale_y_continuous(name="Total Fatalities") + 
+		 ggtitle(title1) +
+		 theme_bw() +
+		 theme(legend.title=element_blank(), 
+		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		    axis.text.y = element_text(face="bold", size=8, angle=55),
+		    plot.title= element_text(face="bold", size=10),
+		    axis.title = element_text(face="bold", size=8)
+		 ) +
+		 geom_bar(stat="identity",position='dodge',aes(x=EventName, y=FATALITIES,fill=factor(EventName)), show.legend=FALSE) 
+
+stormDatasetINJURIES <- transform(stormDatasetSUM, EventName = reorder(EventName,INJURIES)) %>% arrange(desc(INJURIES))
+title1 <- "Top 10 Most Injuries by Event Type"
+subtitle1 <- ""
+p2 <- ggplot(data=stormDatasetINJURIES[1:10,]) + 
+		 scale_x_discrete(name="Event TYpe") +
+		 scale_y_continuous(name="Total Injuries") + 
+		 ggtitle(title1) +
+		 theme_bw() +
+		 theme(legend.title=element_blank(), 
+		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		    axis.text.y = element_text(face="bold", size=8, angle=55),
+		    plot.title= element_text(face="bold", size=10),
+		    axis.title = element_text(face="bold", size=8)
+		 ) +
+		 geom_bar(stat="identity",position='dodge',aes(x=EventName, y=INJURIES,fill=factor(EventName)), show.legend=FALSE) 
+
+grid.arrange(p1, p2, ncol=2)
+
+```
+
+#### TORNADO caused the highet public health damages.
+
+### The top ten Events causing Crop and Property Damage  
+We are looking at those Event types that have the largest effects on Crop or Property: 
+
+```{r}
+stormDatasetCROPDMG <- transform(stormDatasetSUM, EventName = reorder(EventName,CROPDMG)) %>% arrange(desc(CROPDMG))
+title1 <- "Top 10 Most Crop Damage by Event Type"
+subtitle1 <- ""
+p3 <- ggplot(data=stormDatasetCROPDMG[1:10,]) + 
+		 scale_x_discrete(name="Event Type") +
+		 scale_y_continuous(name="US Dollars") + 
+		 ggtitle(title1) +
+		 theme_bw() +
+		 theme(legend.title=element_blank(), 
+		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		    axis.text.y = element_text(face="bold", size=8, angle=55),
+		    plot.title= element_text(face="bold", size=10),
+		    axis.title = element_text(face="bold", size=8)
+		 ) +
+		 geom_bar(stat="identity",position='dodge',aes(x=EventName, y=CROPDMG,fill=factor(EventName)), show.legend=FALSE) 
+
+stormDatasetPROPDMG <- transform(stormDatasetSUM, EventName = reorder(EventName,PROPDMG)) %>% arrange(desc(PROPDMG))
+title1 <- "Top 10 Most Property Damage by Event Type"
+subtitle1 <- ""
+p4 <- ggplot(data=stormDatasetPROPDMG[1:10,]) + 
+		 scale_x_discrete(name="Event Type") +
+		 scale_y_continuous(name="US Dollars") + 
+		 ggtitle(title1) +
+		 theme_bw() +
+		 theme(legend.title=element_blank(), 
+		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		    axis.text.y = element_text(face="bold", size=8, angle=55),
+		    plot.title= element_text(face="bold", size=10),
+		    axis.title = element_text(face="bold", size=8)
+		 ) +
+		 geom_bar(stat="identity",position='dodge',aes(x=EventName, y=PROPDMG,fill=factor(EventName)), show.legend=FALSE) 
+
+
+grid.arrange(p3, p4, ncol=2)
+
+```
+
+#### FLOOD caused the highet Property damages. DROUGHT caused the highet Crop damages.
+
+### The State Office have top ten Fatalities and Injuries.
+We are looking at those Sate Offices that have the largest effects on population health. 
+
+```{r}
+# Summarized Dataset by STATEOFFICE
+stormDatasetStateSUM <- stormDataset %>% group_by(STATEOFFIC) %>% 
+  summarize(FATALITIES = sum(FATALITIES, na.rm=T), 
+            INJURIES = sum(INJURIES, na.rm=T), PROPDMG = sum(PROPDMG, na.rm=T), 
+            CROPDMG = sum(CROPDMG, na.rm=T)) %>% 
+  arrange(desc(PROPDMG)) %>% 
+  ungroup()
+
+stormDatasetStateFATALITIES <- transform(stormDatasetStateSUM, STATEOFFIC = reorder(STATEOFFIC,FATALITIES)) %>% arrange(desc(FATALITIES))
+title1 <- "Top 10 Most Fatal by State Office"
+subtitle1 <- ""
+p1 <- ggplot(data=stormDatasetStateFATALITIES[1:10,]) + 
+		 scale_x_discrete(name="State Office") +
+		 scale_y_continuous(name="Total Fatalities") + 
+		 ggtitle(title1) +
+		 theme_bw() +
+		 theme(legend.title=element_blank(), 
+		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		    axis.text.y = element_text(face="bold", size=8, angle=55),
+		    plot.title= element_text(face="bold", size=10),
+		    axis.title = element_text(face="bold", size=8)
+		 ) +
+		 geom_bar(stat="identity",position='dodge',aes(x=STATEOFFIC, y=FATALITIES,fill=factor(STATEOFFIC)), show.legend=FALSE) 
+
+stormDatasetStateINJURIES <- transform(stormDatasetStateSUM, STATEOFFIC = reorder(STATEOFFIC,INJURIES)) %>% arrange(desc(INJURIES))
+title1 <- "Top 10 Most Injuries by State Office"
+subtitle1 <- ""
+p2 <- ggplot(data=stormDatasetStateINJURIES[1:10,]) + 
+		 scale_x_discrete(name="State Office") +
+		 scale_y_continuous(name="Total Injuries") + 
+		 ggtitle(title1) +
+		 theme_bw() +
+		 theme(legend.title=element_blank(), 
+		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		    axis.text.y = element_text(face="bold", size=8, angle=55),
+		    plot.title= element_text(face="bold", size=10),
+		    axis.title = element_text(face="bold", size=8)
+		 ) +
+		 geom_bar(stat="identity",position='dodge',aes(x=STATEOFFIC, y=INJURIES,fill=factor(STATEOFFIC)), show.legend=FALSE) 
+
+grid.arrange(p1, p2, ncol=2)
+
+```
+
+#### ILLINOIS(North), PENNSYLVANIA had the highet Fatalities. TEXAS (South), MISSOURI (East) had the highest Injurious.
+
+### The State Office have top ten Crop and Property Damage  
+We are looking at those State Offices that have the largest effects on Crop or Property: 
+
+```{r}
+stormDatasetStateCROPDMG <- transform(stormDatasetStateSUM, STATEOFFIC = reorder(STATEOFFIC,CROPDMG)) %>% arrange(desc(CROPDMG))
+title1 <- "Top 10 Most Crop Damage by State Office"
+subtitle1 <- ""
+p3 <- ggplot(data=stormDatasetStateCROPDMG[1:10,]) + 
+		 scale_x_discrete(name="State Office") +
+		 scale_y_continuous(name="US Dollars") + 
+		 ggtitle(title1) +
+		 theme_bw() +
+		 theme(legend.title=element_blank(), 
+		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		    axis.text.y = element_text(face="bold", size=8, angle=55),
+		    plot.title= element_text(face="bold", size=10),
+		    axis.title = element_text(face="bold", size=8)
+		 ) +
+		 geom_bar(stat="identity",position='dodge',aes(x=STATEOFFIC, y=CROPDMG,fill=factor(STATEOFFIC)), show.legend=FALSE) 
+
+stormDatasetStatePROPDMG <- transform(stormDatasetStateSUM, STATEOFFIC = reorder(STATEOFFIC,PROPDMG)) %>% arrange(desc(PROPDMG))
+title1 <- "Top 10 Most Property Damage by State Office"
+subtitle1 <- ""
+p4 <- ggplot(data=stormDatasetStatePROPDMG[1:10,]) + 
+		 scale_x_discrete(name="State Office") +
+		 scale_y_continuous(name="US Dollars") + 
+		 ggtitle(title1) +
+		 theme_bw() +
+		 theme(legend.title=element_blank(), 
+		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		    axis.text.y = element_text(face="bold", size=8, angle=55),
+		    plot.title= element_text(face="bold", size=10),
+		    axis.title = element_text(face="bold", size=8)
+		 ) +
+		 geom_bar(stat="identity",position='dodge',aes(x=STATEOFFIC, y=PROPDMG,fill=factor(STATEOFFIC)), show.legend=FALSE) 
+
+
+grid.arrange(p3, p4, ncol=2)
+
+```
+
+#### IOWA (Central), FLORIDA (Southarn) had the highet Crop damages. CALIFORNIA, LOUISIANA had the highest Property damages.
+
+### The Years have top ten Fatalities and Injuries.
+We are looking at those Years that have the largest effects on population health. 
+
+```{r}
+# Summarized Dataset by STATEOFFICE
+stormDatasetYearSUM <- stormDataset %>% group_by(EventYear) %>% 
+  summarize(FATALITIES = sum(FATALITIES, na.rm=T), 
+            INJURIES = sum(INJURIES, na.rm=T), PROPDMG = sum(PROPDMG, na.rm=T), 
+            CROPDMG = sum(CROPDMG, na.rm=T)) %>% 
+  arrange(desc(PROPDMG)) %>% 
+  ungroup()
+
+stormDatasetYearFATALITIES <- transform(stormDatasetYearSUM, EventYear = reorder(EventYear,FATALITIES)) %>% arrange(desc(FATALITIES))
+title1 <- "Top 10 Most Fatal by Year"
+subtitle1 <- ""
+p1 <- ggplot(data=stormDatasetYearFATALITIES[1:10,]) + 
+		 scale_x_discrete(name="Year") +
+		 scale_y_continuous(name="Total Fatalities") + 
+		 ggtitle(title1) +
+		 theme_bw() +
+		 theme(legend.title=element_blank(), 
+		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		    axis.text.y = element_text(face="bold", size=8, angle=55),
+		    plot.title= element_text(face="bold", size=10),
+		    axis.title = element_text(face="bold", size=8)
+		 ) +
+		 geom_bar(stat="identity",position='dodge',aes(x=EventYear, y=FATALITIES,fill=factor(EventYear)), show.legend=FALSE) 
+
+stormDatasetYearINJURIES <- transform(stormDatasetYearSUM, EventYear = reorder(EventYear,INJURIES)) %>% arrange(desc(INJURIES))
+title1 <- "Top 10 Most Injuries by Year"
+subtitle1 <- ""
+p2 <- ggplot(data=stormDatasetYearINJURIES[1:10,]) + 
+		 scale_x_discrete(name="Year") +
+		 scale_y_continuous(name="Total Injuries") + 
+		 ggtitle(title1) +
+		 theme_bw() +
+		 theme(legend.title=element_blank(), 
+		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		    axis.text.y = element_text(face="bold", size=8, angle=55),
+		    plot.title= element_text(face="bold", size=10),
+		    axis.title = element_text(face="bold", size=8)
+		 ) +
+		 geom_bar(stat="identity",position='dodge',aes(x=EventYear, y=INJURIES,fill=factor(EventYear)), show.legend=FALSE) 
+
+grid.arrange(p1, p2, ncol=2)
+
+```
+
+#### 2011 and 1999 had the highet Fatalities. 2011 and 1998 had the highest Injuries.
+
+### The Years have top ten Crop and Property Damage  
+We are looking at those Years that have the largest effects on Crop or Property: 
+
+```{r}
+stormDatasetYearCROPDMG <- transform(stormDatasetYearSUM, EventYear = reorder(EventYear,CROPDMG)) %>% arrange(desc(CROPDMG))
+title1 <- "Top 10 Most Crop Damage by Year"
+subtitle1 <- ""
+p3 <- ggplot(data=stormDatasetYearCROPDMG[1:10,]) + 
+		 scale_x_discrete(name="Year") +
+		 scale_y_continuous(name="US Dollars") + 
+		 ggtitle(title1) +
+		 theme_bw() +
+		 theme(legend.title=element_blank(), 
+		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		    axis.text.y = element_text(face="bold", size=8, angle=55),
+		    plot.title= element_text(face="bold", size=10),
+		    axis.title = element_text(face="bold", size=8)
+		 ) +
+		 geom_bar(stat="identity",position='dodge',aes(x=EventYear, y=CROPDMG,fill=factor(EventYear)), show.legend=FALSE) 
+
+stormDatasetYearPROPDMG <- transform(stormDatasetYearSUM, EventYear = reorder(EventYear,PROPDMG)) %>% arrange(desc(PROPDMG))
+title1 <- "Top 10 Most Property Damage by Year"
+subtitle1 <- ""
+p4 <- ggplot(data=stormDatasetYearPROPDMG[1:10,]) + 
+		 scale_x_discrete(name="Year") +
+		 scale_y_continuous(name="US Dollars") + 
+		 ggtitle(title1) +
+		 theme_bw() +
+		 theme(legend.title=element_blank(), 
+		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		    axis.text.y = element_text(face="bold", size=8, angle=55),
+		    plot.title= element_text(face="bold", size=10),
+		    axis.title = element_text(face="bold", size=8)
+		 ) +
+		 geom_bar(stat="identity",position='dodge',aes(x=EventYear, y=PROPDMG,fill=factor(EventYear)), show.legend=FALSE) 
+
+
+grid.arrange(p3, p4, ncol=2)
+
+```
+
+#### 2005 and 1998 had the highet Crop damages. 2005 and 2006 had the highest Property damages.
