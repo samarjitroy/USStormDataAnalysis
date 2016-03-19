@@ -1,8 +1,8 @@
 ---
-title: "Severe weather events causes public health and economic problems"
+title: "Storms and Severe Weather Events causes Public Health and Economic Problems"
 author: "Samarjit Roy"
 date: "March 6, 2016"
-output: html_document
+output: pdf_document
 ---
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -15,6 +15,9 @@ require("stringdist",character.only = TRUE)
 require("ggplot2",character.only = TRUE)
 require("gridExtra",character.only = TRUE)
 require("stringr",character.only = TRUE)
+
+
+#Sys.setenv(PATH = paste(Sys.getenv("PATH"), "C:\\Program Files (x86)\\MiKTeX 2.9\\miktex\\bin", sep=.Platform$path.sep))
 
 ```
 ## Introducton
@@ -47,10 +50,10 @@ stormDataset <- read.csv(stormFileName)
 
 ```
 
-Summary Data for Storm Data:
+sample Data for Storm Data:
 
 ```{r}
-summary(stormDataset)
+head(stormDataset)
 ```
 
 ## Data Transformations
@@ -105,10 +108,14 @@ EventTypes <- sort(unique(stormDataset$EVTYPE))
 distanceEventMatrix <- stringdistmatrix(EventTypes, EventTypes, method="jw")
 rownames(distanceEventMatrix) <- EventTypes
 EventTypesHC <- hclust(as.dist(distanceEventMatrix))
-plot(EventTypesHC)
+par(mar=c(2,2,1,3)) 
+plot(as.dendrogram(EventTypesHC),horiz=T,main="Figur-1: Event Types Dendrogram")
+
 ```
 
-As it was told that we have only 48 events, we tried with k=48, which produced the following sample:
+#### Figure-1
+From this Dendrogram it is hard to point out what could be the better h value for cutree. As NOAA's National Weather Service (NWS) mentioned that we have only 48 events, we tried cutree with k=48, which produced the following sample output.
+
 ```{r}
 dend1 <- cutree(EventTypesHC,k=48)
 EventTypesTable <- data.frame(EventTypes,Cluster=dend1)
@@ -117,7 +124,8 @@ rownames(EventTypesTable) <- 1:TotalRows
 EventTypesTable <- arrange(EventTypesTable,Cluster)
 filter(EventTypesTable,Cluster==45)
 ```
-The cluster does not make sense. We also tried with different h values. Looks like .14 is the better option for h.
+This sample does not make sense to combined COLD, RAIN & COLD together. We also tried with different h values and we found h=.14 is the better option for us, which produced the following sample output.
+
 ```{r}
 dend1 <- cutree(EventTypesHC,h=.14)
 EventTypesTable <- data.frame(EventTypes,Cluster=dend1)
@@ -127,7 +135,9 @@ EventTypesTable <- arrange(EventTypesTable,Cluster)
 filter(EventTypesTable,Cluster==45)
 filter(EventTypesTable, grepl('UNSEASONA', EventTypes))
 ```
-### Merge Culsterd Event Types With the Storm Data
+
+### Merge new Culsterd Event Types With the Storm Data
+After observing the above sample output we decided to accept the new EnventTypesTables which will help us to combined all the different types and get a meaningful Event Type Data set. We merged new Events types Dataset with the Storm Dataset and we used EventName column for rest of the analysis. 
 
 ```{r}
 EventTypesByCluster <- EventTypesTable %>% group_by(Cluster) %>% slice(which.max(EventTypes))
@@ -136,9 +146,10 @@ Events <- full_join(EventTypesTable,EventTypesByCluster)
 stormDataset <- merge(stormDataset, Events, by.x="EVTYPE", by.y="EventTypes", all.x=T, all.y=F)
 ```
 ### Property/Crop Damage Dollar Amount 
-As PROPDMG and CROPDMG have different values according to the units (B-Billion, M-Million, K-Thousand), we converted all ammounts fields to one unit. 
+As PROPDMG and CROPDMG have different unit values as follows: B-Billion, M-Million, K-Thousand. We converted all amounts fields to one dollar unit for our analysis. 
 
 ```{r}
+
 stormDataset$PROPDMG <- ifelse(stormDataset$PROPDMGEXP == 'B', 1E9,
                         ifelse(stormDataset$PROPDMGEXP == 'M', 1E6,
                         ifelse(stormDataset$PROPDMGEXP == 'K', 1E3, 0))) * stormDataset$PROPDMG
@@ -154,93 +165,94 @@ stormDatasetSUM <- stormDataset %>% group_by(Cluster) %>%
 
 ## Results
 
-### The top ten Events causing Fatalities and Injuries.
-We are looking at those storm types that have the largest effects on population health. 
+### Finding Top Ten Events causing highest Fatalities, Injuries, Crop and Property Damages 
+We searched for those Event types that caused the largest effects on population health, crop and property Damages. 
 
 ```{r}
 stormDatasetFATALITIES <- transform(stormDatasetSUM, EventName = reorder(EventName,FATALITIES)) %>% arrange(desc(FATALITIES))
 title1 <- "Top 10 Most Fatal by Event Type"
-subtitle1 <- ""
 p1 <- ggplot(data=stormDatasetFATALITIES[1:10,]) + 
 		 scale_x_discrete(name="Event Type") +
 		 scale_y_continuous(name="Total Fatalities") + 
 		 ggtitle(title1) +
 		 theme_bw() +
-		 theme(legend.title=element_blank(), 
-		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		 theme(legend.title=element_blank(), legend.position=c(.25, .65),
+		    legend.text = element_text(face="bold", size=6),
+		    legend.key.size = unit(.23, "cm"),
+		    legend.background = element_rect(colour = "black"), legend.margin = unit(.5, "cm"),
 		    axis.text.y = element_text(face="bold", size=8, angle=55),
-		    plot.title= element_text(face="bold", size=10),
-		    axis.title = element_text(face="bold", size=8)
+		    plot.title= element_text(face="bold", size=9),
+		    axis.title = element_text(face="bold", size=8),
+		    axis.text.x=element_blank()
 		 ) +
-		 geom_bar(stat="identity",position='dodge',aes(x=EventName, y=FATALITIES,fill=factor(EventName)), show.legend=FALSE) 
+		 geom_bar(stat="identity",position='dodge',aes(x=EventName, y=FATALITIES,fill=factor(EventName)), show.legend=TRUE) 
 
 stormDatasetINJURIES <- transform(stormDatasetSUM, EventName = reorder(EventName,INJURIES)) %>% arrange(desc(INJURIES))
 title1 <- "Top 10 Most Injuries by Event Type"
-subtitle1 <- ""
 p2 <- ggplot(data=stormDatasetINJURIES[1:10,]) + 
 		 scale_x_discrete(name="Event TYpe") +
 		 scale_y_continuous(name="Total Injuries") + 
 		 ggtitle(title1) +
 		 theme_bw() +
-		 theme(legend.title=element_blank(), 
-		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		 theme(legend.title=element_blank(), legend.position=c(.30, .65),
+		    legend.text = element_text(face="bold", size=6),
+		    legend.key.size = unit(.23, "cm"),
+		    legend.background = element_rect(colour = "black"), legend.margin = unit(.5, "cm"),
 		    axis.text.y = element_text(face="bold", size=8, angle=55),
-		    plot.title= element_text(face="bold", size=10),
-		    axis.title = element_text(face="bold", size=8)
+		    plot.title= element_text(face="bold", size=9),
+		    axis.title = element_text(face="bold", size=8),
+		    axis.text.x=element_blank()
 		 ) +
-		 geom_bar(stat="identity",position='dodge',aes(x=EventName, y=INJURIES,fill=factor(EventName)), show.legend=FALSE) 
+		 geom_bar(stat="identity",position='dodge',aes(x=EventName, y=INJURIES,fill=factor(EventName)), show.legend=TRUE) 
 
-grid.arrange(p1, p2, ncol=2)
 
-```
-
-#### TORNADO caused the highet public health damages.
-
-### The top ten Events causing Crop and Property Damage  
-We are looking at those Event types that have the largest effects on Crop or Property: 
-
-```{r}
 stormDatasetCROPDMG <- transform(stormDatasetSUM, EventName = reorder(EventName,CROPDMG)) %>% arrange(desc(CROPDMG))
 title1 <- "Top 10 Most Crop Damage by Event Type"
-subtitle1 <- ""
 p3 <- ggplot(data=stormDatasetCROPDMG[1:10,]) + 
 		 scale_x_discrete(name="Event Type") +
 		 scale_y_continuous(name="US Dollars") + 
 		 ggtitle(title1) +
 		 theme_bw() +
-		 theme(legend.title=element_blank(), 
-		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		 theme(legend.title=element_blank(), legend.position=c(.25, .65),
+		    legend.text = element_text(face="bold", size=6),
+		    legend.key.size = unit(.23, "cm"),
+		    legend.background = element_rect(colour = "black"), legend.margin = unit(.5, "cm"),
 		    axis.text.y = element_text(face="bold", size=8, angle=55),
-		    plot.title= element_text(face="bold", size=10),
-		    axis.title = element_text(face="bold", size=8)
+		    plot.title= element_text(face="bold", size=9),
+		    axis.title = element_text(face="bold", size=8),
+		    axis.text.x=element_blank()
 		 ) +
-		 geom_bar(stat="identity",position='dodge',aes(x=EventName, y=CROPDMG,fill=factor(EventName)), show.legend=FALSE) 
+		 geom_bar(stat="identity",position='dodge',aes(x=EventName, y=CROPDMG,fill=factor(EventName)), show.legend=TRUE) 
 
 stormDatasetPROPDMG <- transform(stormDatasetSUM, EventName = reorder(EventName,PROPDMG)) %>% arrange(desc(PROPDMG))
 title1 <- "Top 10 Most Property Damage by Event Type"
-subtitle1 <- ""
 p4 <- ggplot(data=stormDatasetPROPDMG[1:10,]) + 
 		 scale_x_discrete(name="Event Type") +
 		 scale_y_continuous(name="US Dollars") + 
 		 ggtitle(title1) +
 		 theme_bw() +
-		 theme(legend.title=element_blank(), 
-		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		 theme(legend.title=element_blank(), legend.position=c(.25, .65),
+		    legend.text = element_text(face="bold", size=6),
+		    legend.key.size = unit(.23, "cm"),
+		    legend.background = element_rect(colour = "black"), legend.margin = unit(.5, "cm"),
 		    axis.text.y = element_text(face="bold", size=8, angle=55),
-		    plot.title= element_text(face="bold", size=10),
-		    axis.title = element_text(face="bold", size=8)
+		    plot.title= element_text(face="bold", size=9),
+		    axis.title = element_text(face="bold", size=8),
+		    axis.text.x=element_blank()
 		 ) +
-		 geom_bar(stat="identity",position='dodge',aes(x=EventName, y=PROPDMG,fill=factor(EventName)), show.legend=FALSE) 
+		 geom_bar(stat="identity",position='dodge',aes(x=EventName, y=PROPDMG,fill=factor(EventName)), show.legend=TRUE) 
 
-
-grid.arrange(p3, p4, ncol=2)
+grid.arrange(p1, p2, p3, p4, ncol=2, top ="Figure-2")
 
 ```
 
-#### FLOOD caused the highet Property damages. DROUGHT caused the highet Crop damages.
+#### Figure-2
+EXCESSIVE HEAT and TORNADO caused the highest Fatalities. TORNADO and FLOOD caused the highest Injurious.
+DROUGHT caused the highest Crop damages. FLOOD caused the highest Property damages.
 
-### The State Office have top ten Fatalities and Injuries.
-We are looking at those Sate Offices that have the largest effects on population health. 
+### Finding Top Ten States had highest Fatalities, Injuries, Crop and Property Damages 
+We searched for those Sates that have the largest effects on population health, crop and property Damage 
+
 
 ```{r}
 # Summarized Dataset by STATEOFFICE
@@ -253,174 +265,109 @@ stormDatasetStateSUM <- stormDataset %>% group_by(STATEOFFIC) %>%
 
 stormDatasetStateFATALITIES <- transform(stormDatasetStateSUM, STATEOFFIC = reorder(STATEOFFIC,FATALITIES)) %>% arrange(desc(FATALITIES))
 title1 <- "Top 10 Most Fatal by State Office"
-subtitle1 <- ""
 p1 <- ggplot(data=stormDatasetStateFATALITIES[1:10,]) + 
 		 scale_x_discrete(name="State Office") +
 		 scale_y_continuous(name="Total Fatalities") + 
 		 ggtitle(title1) +
 		 theme_bw() +
-		 theme(legend.title=element_blank(), 
-		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		 theme(legend.title=element_blank(), legend.position=c(.3, .7),
+		    legend.text = element_text(face="bold", size=5),
+		    legend.key.size = unit(.23, "cm"),
+		    legend.background = element_rect(colour = "black"), legend.margin = unit(.5, "cm"),
 		    axis.text.y = element_text(face="bold", size=8, angle=55),
-		    plot.title= element_text(face="bold", size=10),
-		    axis.title = element_text(face="bold", size=8)
+		    plot.title= element_text(face="bold", size=9),
+		    axis.title = element_text(face="bold", size=8),
+		    axis.text.x=element_blank()
 		 ) +
-		 geom_bar(stat="identity",position='dodge',aes(x=STATEOFFIC, y=FATALITIES,fill=factor(STATEOFFIC)), show.legend=FALSE) 
+		 geom_bar(stat="identity",position='dodge',aes(x=STATEOFFIC, y=FATALITIES,fill=factor(STATEOFFIC)), show.legend=TRUE) 
 
 stormDatasetStateINJURIES <- transform(stormDatasetStateSUM, STATEOFFIC = reorder(STATEOFFIC,INJURIES)) %>% arrange(desc(INJURIES))
 title1 <- "Top 10 Most Injuries by State Office"
-subtitle1 <- ""
 p2 <- ggplot(data=stormDatasetStateINJURIES[1:10,]) + 
 		 scale_x_discrete(name="State Office") +
 		 scale_y_continuous(name="Total Injuries") + 
 		 ggtitle(title1) +
 		 theme_bw() +
-		 theme(legend.title=element_blank(), 
-		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		 theme(legend.title=element_blank(), legend.position=c(.35, .7),
+		    legend.text = element_text(face="bold", size=5),
+		    legend.key.size = unit(.23, "cm"),
+		    legend.background = element_rect(colour = "black"), legend.margin = unit(.5, "cm"),
 		    axis.text.y = element_text(face="bold", size=8, angle=55),
-		    plot.title= element_text(face="bold", size=10),
-		    axis.title = element_text(face="bold", size=8)
+		    plot.title= element_text(face="bold", size=9),
+		    axis.title = element_text(face="bold", size=8),
+		    axis.text.x=element_blank()
 		 ) +
-		 geom_bar(stat="identity",position='dodge',aes(x=STATEOFFIC, y=INJURIES,fill=factor(STATEOFFIC)), show.legend=FALSE) 
+		 geom_bar(stat="identity",position='dodge',aes(x=STATEOFFIC, y=INJURIES,fill=factor(STATEOFFIC)), show.legend=TRUE) 
 
-grid.arrange(p1, p2, ncol=2)
 
-```
-
-#### ILLINOIS(North), PENNSYLVANIA had the highet Fatalities. TEXAS (South), MISSOURI (East) had the highest Injurious.
-
-### The State Office have top ten Crop and Property Damage  
-We are looking at those State Offices that have the largest effects on Crop or Property: 
-
-```{r}
 stormDatasetStateCROPDMG <- transform(stormDatasetStateSUM, STATEOFFIC = reorder(STATEOFFIC,CROPDMG)) %>% arrange(desc(CROPDMG))
 title1 <- "Top 10 Most Crop Damage by State Office"
-subtitle1 <- ""
 p3 <- ggplot(data=stormDatasetStateCROPDMG[1:10,]) + 
 		 scale_x_discrete(name="State Office") +
 		 scale_y_continuous(name="US Dollars") + 
 		 ggtitle(title1) +
 		 theme_bw() +
-		 theme(legend.title=element_blank(), 
-		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		 theme(legend.title=element_blank(), legend.position=c(.3, .7),
+		    legend.text = element_text(face="bold", size=5),
+		    legend.key.size = unit(.23, "cm"),
+		    legend.background = element_rect(colour = "black"), legend.margin = unit(.5, "cm"),
 		    axis.text.y = element_text(face="bold", size=8, angle=55),
-		    plot.title= element_text(face="bold", size=10),
-		    axis.title = element_text(face="bold", size=8)
+		    plot.title= element_text(face="bold", size=9),
+		    axis.title = element_text(face="bold", size=8),
+		    axis.text.x=element_blank()
 		 ) +
-		 geom_bar(stat="identity",position='dodge',aes(x=STATEOFFIC, y=CROPDMG,fill=factor(STATEOFFIC)), show.legend=FALSE) 
+		 geom_bar(stat="identity",position='dodge',aes(x=STATEOFFIC, y=CROPDMG,fill=factor(STATEOFFIC)), show.legend=TRUE) 
 
 stormDatasetStatePROPDMG <- transform(stormDatasetStateSUM, STATEOFFIC = reorder(STATEOFFIC,PROPDMG)) %>% arrange(desc(PROPDMG))
 title1 <- "Top 10 Most Property Damage by State Office"
-subtitle1 <- ""
 p4 <- ggplot(data=stormDatasetStatePROPDMG[1:10,]) + 
 		 scale_x_discrete(name="State Office") +
 		 scale_y_continuous(name="US Dollars") + 
 		 ggtitle(title1) +
 		 theme_bw() +
-		 theme(legend.title=element_blank(), 
-		    axis.text.x = element_text(face="bold", size=8, angle=90),
+		 theme(legend.title=element_blank(), legend.position=c(.25, .7),
+		    legend.text = element_text(face="bold", size=5),
+		    legend.key.size = unit(.23, "cm"),
+		    legend.background = element_rect(colour = "black"), legend.margin = unit(.5, "cm"),
 		    axis.text.y = element_text(face="bold", size=8, angle=55),
-		    plot.title= element_text(face="bold", size=10),
-		    axis.title = element_text(face="bold", size=8)
+		    plot.title= element_text(face="bold", size=9),
+		    axis.title = element_text(face="bold", size=8),
+		    axis.text.x=element_blank()
 		 ) +
-		 geom_bar(stat="identity",position='dodge',aes(x=STATEOFFIC, y=PROPDMG,fill=factor(STATEOFFIC)), show.legend=FALSE) 
+		 geom_bar(stat="identity",position='dodge',aes(x=STATEOFFIC, y=PROPDMG,fill=factor(STATEOFFIC)), show.legend=TRUE) 
 
-
-grid.arrange(p3, p4, ncol=2)
+grid.arrange(p1, p2, p3, p4, ncol=2, top ="Figure-3")
 
 ```
 
-#### IOWA (Central), FLORIDA (Southarn) had the highet Crop damages. CALIFORNIA, LOUISIANA had the highest Property damages.
+#### Figure-3
+ILLINOIS(North), PENNSYLVANIA had the highest Fatalities. TEXAS (South), MISSOURI (East) had the highest Injurious.
+IOWA (Central), FLORIDA (Southarn) had the highest Crop damages. CALIFORNIA, LOUISIANA had the highest Property damages.
 
-### The Years have top ten Fatalities and Injuries.
-We are looking at those Years that have the largest effects on population health. 
+
+### Fatalities, Injuries, Crop and Property Damages By Year.
+We summarized all damages by Years in a Table to show the effects on population health, Crop or Property. 
 
 ```{r}
-# Summarized Dataset by STATEOFFICE
+
 stormDatasetYearSUM <- stormDataset %>% group_by(EventYear) %>% 
   summarize(FATALITIES = sum(FATALITIES, na.rm=T), 
             INJURIES = sum(INJURIES, na.rm=T), PROPDMG = sum(PROPDMG, na.rm=T), 
             CROPDMG = sum(CROPDMG, na.rm=T)) %>% 
-  arrange(desc(PROPDMG)) %>% 
+  arrange(desc(EventYear)) %>% 
   ungroup()
 
-stormDatasetYearFATALITIES <- transform(stormDatasetYearSUM, EventYear = reorder(EventYear,FATALITIES)) %>% arrange(desc(FATALITIES))
-title1 <- "Top 10 Most Fatal by Year"
-subtitle1 <- ""
-p1 <- ggplot(data=stormDatasetYearFATALITIES[1:10,]) + 
-		 scale_x_discrete(name="Year") +
-		 scale_y_continuous(name="Total Fatalities") + 
-		 ggtitle(title1) +
-		 theme_bw() +
-		 theme(legend.title=element_blank(), 
-		    axis.text.x = element_text(face="bold", size=8, angle=90),
-		    axis.text.y = element_text(face="bold", size=8, angle=55),
-		    plot.title= element_text(face="bold", size=10),
-		    axis.title = element_text(face="bold", size=8)
-		 ) +
-		 geom_bar(stat="identity",position='dodge',aes(x=EventYear, y=FATALITIES,fill=factor(EventYear)), show.legend=FALSE) 
+colnames(stormDatasetYearSUM) <- c("Year","Fatality","Injury","Property(US $)","Crop(US $)")
+t1 <- ttheme_default(core=list(
+        fg_params=list(fontface=c(rep("plain", 16), "bold.italic")),
+        bg_params = list(fill=c(rep(c("grey95", "grey90"),
+                                    length.out=16), "#6BAED6"),
+                         alpha = rep(c(1,0.5), each=16))
+        ))
 
-stormDatasetYearINJURIES <- transform(stormDatasetYearSUM, EventYear = reorder(EventYear,INJURIES)) %>% arrange(desc(INJURIES))
-title1 <- "Top 10 Most Injuries by Year"
-subtitle1 <- ""
-p2 <- ggplot(data=stormDatasetYearINJURIES[1:10,]) + 
-		 scale_x_discrete(name="Year") +
-		 scale_y_continuous(name="Total Injuries") + 
-		 ggtitle(title1) +
-		 theme_bw() +
-		 theme(legend.title=element_blank(), 
-		    axis.text.x = element_text(face="bold", size=8, angle=90),
-		    axis.text.y = element_text(face="bold", size=8, angle=55),
-		    plot.title= element_text(face="bold", size=10),
-		    axis.title = element_text(face="bold", size=8)
-		 ) +
-		 geom_bar(stat="identity",position='dodge',aes(x=EventYear, y=INJURIES,fill=factor(EventYear)), show.legend=FALSE) 
-
-grid.arrange(p1, p2, ncol=2)
+grid.table(stormDatasetYearSUM, theme = t1, rows=NULL)
 
 ```
 
-#### 2011 and 1999 had the highet Fatalities. 2011 and 1998 had the highest Injuries.
-
-### The Years have top ten Crop and Property Damage  
-We are looking at those Years that have the largest effects on Crop or Property: 
-
-```{r}
-stormDatasetYearCROPDMG <- transform(stormDatasetYearSUM, EventYear = reorder(EventYear,CROPDMG)) %>% arrange(desc(CROPDMG))
-title1 <- "Top 10 Most Crop Damage by Year"
-subtitle1 <- ""
-p3 <- ggplot(data=stormDatasetYearCROPDMG[1:10,]) + 
-		 scale_x_discrete(name="Year") +
-		 scale_y_continuous(name="US Dollars") + 
-		 ggtitle(title1) +
-		 theme_bw() +
-		 theme(legend.title=element_blank(), 
-		    axis.text.x = element_text(face="bold", size=8, angle=90),
-		    axis.text.y = element_text(face="bold", size=8, angle=55),
-		    plot.title= element_text(face="bold", size=10),
-		    axis.title = element_text(face="bold", size=8)
-		 ) +
-		 geom_bar(stat="identity",position='dodge',aes(x=EventYear, y=CROPDMG,fill=factor(EventYear)), show.legend=FALSE) 
-
-stormDatasetYearPROPDMG <- transform(stormDatasetYearSUM, EventYear = reorder(EventYear,PROPDMG)) %>% arrange(desc(PROPDMG))
-title1 <- "Top 10 Most Property Damage by Year"
-subtitle1 <- ""
-p4 <- ggplot(data=stormDatasetYearPROPDMG[1:10,]) + 
-		 scale_x_discrete(name="Year") +
-		 scale_y_continuous(name="US Dollars") + 
-		 ggtitle(title1) +
-		 theme_bw() +
-		 theme(legend.title=element_blank(), 
-		    axis.text.x = element_text(face="bold", size=8, angle=90),
-		    axis.text.y = element_text(face="bold", size=8, angle=55),
-		    plot.title= element_text(face="bold", size=10),
-		    axis.title = element_text(face="bold", size=8)
-		 ) +
-		 geom_bar(stat="identity",position='dodge',aes(x=EventYear, y=PROPDMG,fill=factor(EventYear)), show.legend=FALSE) 
-
-
-grid.arrange(p3, p4, ncol=2)
-
-```
-
-#### 2005 and 1998 had the highet Crop damages. 2005 and 2006 had the highest Property damages.
+#### Table-1
+Year 2011 and 1999 had the highest Fatalities. Year 2011 and 1998 had the highest Injuries. Year 2005 and 1998 had the highest Crop damages. Year 2005 and 2006 had the highest Property damages.
